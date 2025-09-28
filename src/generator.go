@@ -5,17 +5,15 @@ import (
 	"math"
 )
 
-// Public entry points
 func Generate(cfg Config) *Graph { return GenerateWithPicker(cfg, picker.NewRandomPicker(cfg.Seed)) }
 
 func GenerateWithPicker(cfg Config, pick picker.Picker) *Graph {
-    g := newGenerator(cfg, pick)
-    ends := g.buildTrunks()
-    g.attachTrees(ends)
-    pairs := g.buildPairs()
-    paths := g.buildPaths(pairs)
+	g := newGenerator(cfg, pick)
+	ends := g.buildTrunks()
+	g.attachTrees(ends)
+	pairs, paths := g.buildPairs()
 
-    return g.graph(pairs, paths)
+	return g.graph(pairs, paths)
 }
 
 // generator encapsulates mutable state and helpers
@@ -28,6 +26,13 @@ type generator struct {
 	nodes     []Node
 	out       [][]NodeID
 	in        [][]NodeID
+
+	parentHead []NodeID   // for head-side feeders: child -> parent (towards head)
+	parentTail []NodeID   // for tail-side feeders: child -> parent (towards tail)
+	isSpike    []bool     // nodes created as fake spikes
+	trunks     [][]NodeID // nodes along each trunk from head to tail
+	starts     [][]NodeID // per-trunk start leaves (head side)
+	ends       [][]NodeID // per-trunk end leaves (tail side)
 }
 
 func newGenerator(cfg Config, picker picker.Picker) *generator {
@@ -35,21 +40,15 @@ func newGenerator(cfg Config, picker picker.Picker) *generator {
 	g.allow = prepareAllow(cfg)
 	g.typeProb, g.trunkProb = prepareTypeProbs(cfg)
 
-	/*
-		est := estimateNodeCapacityPick(cfg, pick)
-
-		if est < 1 {
-			est = 1
-		}
-
-		g.nodes = make([]Node, 0, est)
-		g.out = make([][]NodeID, 0, est)
-		g.in = make([][]NodeID, 0, est)
-	*/
-
 	g.nodes = make([]Node, 0, 0)
 	g.out = make([][]NodeID, 0, 0)
 	g.in = make([][]NodeID, 0, 0)
+	g.parentHead = make([]NodeID, 0, 0)
+	g.parentTail = make([]NodeID, 0, 0)
+	g.isSpike = make([]bool, 0, 0)
+	g.trunks = make([][]NodeID, 0, cfg.NumTrunks)
+	g.starts = make([][]NodeID, cfg.NumTrunks)
+	g.ends = make([][]NodeID, cfg.NumTrunks)
 
 	return g
 }
@@ -59,6 +58,9 @@ func (g *generator) addNode(t int, role byte) NodeID {
 	g.nodes = append(g.nodes, Node{Type: int16(t), Role: role})
 	g.out = append(g.out, nil)
 	g.in = append(g.in, nil)
+	g.parentHead = append(g.parentHead, -1)
+	g.parentTail = append(g.parentTail, -1)
+	g.isSpike = append(g.isSpike, false)
 
 	return id
 }
@@ -73,7 +75,7 @@ func (g *generator) setRole(id NodeID, role byte) { g.nodes[id].Role = role }
 func (g *generator) getType(id NodeID) int { return int(g.nodes[id].Type) }
 
 func (g *generator) graph(pairs [][2]NodeID, paths []PairPath) *Graph {
-    return &Graph{Nodes: g.nodes, Out: g.out, In: g.in, Pairs: pairs, Allow: g.allow, Paths: paths}
+	return &Graph{Nodes: g.nodes, Out: g.out, In: g.in, Pairs: pairs, Allow: g.allow, Paths: paths}
 }
 
 func (g *generator) buildTrunks() [][2]NodeID {
@@ -83,6 +85,8 @@ func (g *generator) buildTrunks() [][2]NodeID {
 		startType := g.picker.WeightedGlobal(g.trunkProb)
 		u := g.addNode(startType, 1)
 		head := u
+		seq := make([]NodeID, 0, 8)
+		seq = append(seq, u)
 
 		L := g.picker.GeomLen(g.cfg.AvgTrunkLen)
 		if g.cfg.TrunkLenMin > 0 && L < g.cfg.TrunkLenMin {
@@ -96,10 +100,14 @@ func (g *generator) buildTrunks() [][2]NodeID {
 			if g.allow[prevType][nextType] {
 				g.addEdge(u, v)
 			}
+
 			u = v
 			prevType = nextType
+			seq = append(seq, v)
 		}
+
 		ends[m] = [2]NodeID{head, u}
+		g.trunks = append(g.trunks, seq)
 	}
 
 	return ends
@@ -118,12 +126,12 @@ func (g *generator) attachTrees(trunkEnds [][2]NodeID) {
 			g.setRole(tail, 4)
 		}
 
-		g.buildFeederTree(head, true)
-		g.buildFeederTree(tail, false)
+		g.buildFeederTree(m, head, true)
+		g.buildFeederTree(m, tail, false)
 	}
 }
 
-func (g *generator) buildFeederTree(root NodeID, makeStarts bool) {
+func (g *generator) buildFeederTree(trunkIdx int, root NodeID, makeStarts bool) {
 	depth := g.picker.GeomLen(g.cfg.AvgBranchLen)
 	if depth < 1 {
 		depth = 1
@@ -141,8 +149,18 @@ func (g *generator) buildFeederTree(root NodeID, makeStarts bool) {
 			for c := 0; c < children; c++ {
 				nxtType := g.picker.WeightedAllowed(fromType, g.typeProb, g.allow)
 				child := g.addNode(nxtType, 2)
-				if g.allow[nxtType][fromType] {
-					g.addEdge(child, parent)
+				if makeStarts {
+					// head-side: edges child -> parent (towards head)
+					if g.allow[nxtType][fromType] {
+						g.addEdge(child, parent)
+						g.parentHead[child] = parent
+					}
+				} else {
+					// tail-side: edges parent -> child (away from tail)
+					if g.allow[fromType][nxtType] {
+						g.addEdge(parent, child)
+						g.parentTail[child] = parent
+					}
 				}
 				if g.cfg.FakeBranchFac > 0 {
 					g.addFakeBranches(child, nxtType)
@@ -155,8 +173,10 @@ func (g *generator) buildFeederTree(root NodeID, makeStarts bool) {
 			for _, leaf := range nextFrontier {
 				if makeStarts {
 					g.setRole(leaf, 3)
+					g.starts[trunkIdx] = append(g.starts[trunkIdx], leaf)
 				} else {
 					g.setRole(leaf, 4)
+					g.ends[trunkIdx] = append(g.ends[trunkIdx], leaf)
 				}
 			}
 		}
@@ -177,6 +197,7 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 		for i := 0; i < L; i++ {
 			nxt := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
 			n := g.addNode(nxt, 2)
+			g.isSpike[n] = true
 
 			if g.picker.CoinFlip() {
 				if g.allow[nxt][int(pt)] {
@@ -195,6 +216,7 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 		if g.picker.Bernoulli(g.cfg.DeadEndProb) {
 			leafT := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
 			leaf := g.addNode(leafT, 2)
+			g.isSpike[leaf] = true
 
 			if g.allow[int(pt)][leafT] {
 				g.addEdge(prev, leaf)
@@ -203,110 +225,107 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 	}
 }
 
-func (g *generator) buildPairs() [][2]NodeID {
+func (g *generator) buildPairs() (pairs [][2]NodeID, paths []PairPath) {
 	if !g.cfg.MakePairs {
-		return nil
+		return nil, nil
 	}
 
-	starts := make([]NodeID, 0)
-	ends := make([]NodeID, 0)
-
-	for i := range g.nodes {
-		switch g.nodes[i].Role {
-		case 3:
-			starts = append(starts, NodeID(i))
-		case 4:
-			ends = append(ends, NodeID(i))
+	totalCap := 0
+	for m := range g.trunks {
+		a := len(g.starts[m])
+		b := len(g.ends[m])
+		if a < b {
+			totalCap += a
+		} else {
+			totalCap += b
 		}
 	}
 
-	n := len(starts)
-	if len(ends) < n {
-
-		n = len(ends)
+	if totalCap == 0 {
+		return nil, nil
 	}
 
-	if n == 0 {
-		return nil
+	pairs = make([][2]NodeID, 0, totalCap)
+	paths = make([]PairPath, 0, totalCap)
+
+	for m := range g.trunks {
+		s := g.starts[m]
+		e := g.ends[m]
+		n := len(s)
+
+		if len(e) < n {
+			n = len(e)
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		for i := 0; i < n; i++ {
+			j := (i*7 + 3) % n
+			a := s[i]
+			b := e[j]
+			p := g.buildPathForPair(m, a, b)
+			pairs = append(pairs, [2]NodeID{a, b})
+			paths = append(paths, PairPath{A: a, B: b, Path: p})
+		}
 	}
 
-	pairs := make([][2]NodeID, 0, n)
-	for i := 0; i < n; i++ {
-		j := (i*7 + 3) % n
-		pairs = append(pairs, [2]NodeID{starts[i], ends[j]})
-	}
-
-    return pairs
+	return pairs, paths
 }
 
-// buildPaths computes shortest (by edges) paths for each pair using BFS
-func (g *generator) buildPaths(pairs [][2]NodeID) []PairPath {
-    if len(pairs) == 0 {
-        return nil
-    }
-    res := make([]PairPath, 0, len(pairs))
-    for _, pr := range pairs {
-        p := shortestPath(g.out, pr[0], pr[1])
-        res = append(res, PairPath{A: pr[0], B: pr[1], Path: p})
-    }
-    return res
-}
+func (g *generator) buildPathForPair(trunkIdx int, start NodeID, end NodeID) []NodeID {
+	trunk := g.trunks[trunkIdx]
+	head := trunk[0]
+	tail := trunk[len(trunk)-1]
 
-// shortestPath returns node sequence from start to goal via directed edges
-func shortestPath(out [][]NodeID, start, goal NodeID) []NodeID {
-    if start == goal {
-        return []NodeID{start}
-    }
-    n := len(out)
-    if n == 0 {
-        return nil
-    }
-    visited := make([]bool, n)
-    prev := make([]NodeID, n)
-    for i := range prev {
-        prev[i] = -1
-    }
-    q := make([]NodeID, 0, 16)
-    visited[start] = true
-    q = append(q, start)
-    found := false
+	// segment A: start -> ... -> head
+	segA := make([]NodeID, 0, 8)
+	cur := start
+	for {
+		segA = append(segA, cur)
+		if cur == head {
+			break
+		}
+		cur = g.parentHead[cur]
+		if cur == -1 {
+			return nil
+		}
+	}
 
-    for len(q) > 0 && !found {
-        u := q[0]
-        q = q[1:]
-        for _, v := range out[u] {
-            if !visited[v] {
-                visited[v] = true
-                prev[v] = u
-                if v == goal {
-                    found = true
-                    break
-                }
-                q = append(q, v)
-            }
-        }
-    }
+	// segment B: trunk head..tail
+	segB := trunk
+	// segment C: tail .. end (walk end->tail via parentTail, then reverse)
+	tmp := make([]NodeID, 0, 8)
+	cur = end
+	for {
+		tmp = append(tmp, cur)
+		if cur == tail {
+			break
+		}
+		cur = g.parentTail[cur]
+		if cur == -1 {
+			return nil
+		}
+	}
 
-    if !found {
-        return nil
-    }
+	// reverse tmp to get tail->...->end
+	for i, j := 0, len(tmp)-1; i < j; i, j = i+1, j-1 {
+		tmp[i], tmp[j] = tmp[j], tmp[i]
+	}
+	segC := tmp
 
-    // reconstruct from goal to start
-    path := make([]NodeID, 0, 16)
-    cur := goal
-    path = append(path, cur)
-    for cur != start {
-        cur = prev[cur]
-        if cur == -1 { // safety
-            return nil
-        }
-        path = append(path, cur)
-    }
-    // reverse
-    for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-        path[i], path[j] = path[j], path[i]
-    }
-    return path
+	// concat: A + B[1:] + C[1:]
+	res := make([]NodeID, 0, len(segA)+len(segB)+len(segC)-2)
+	res = append(res, segA...)
+	if len(segB) > 1 {
+		res = append(res, segB[1:]...)
+	}
+	if len(segC) > 1 {
+		res = append(res, segC[1:]...)
+	}
+
+	return res
 }
 
 // Заполняем матрицу возможных переходов
@@ -346,24 +365,4 @@ func prepareTypeProbs(cfg Config) (typeProb []float64, trunkProb []float64) {
 	}
 
 	return
-}
-
-func estimateNodeCapacityPick(cfg Config, pick picker.Picker) int {
-	m := cfg.BranchChildrenMean
-	D := cfg.AvgBranchLen
-	factor := 10.0
-	if m > 1 {
-		factor = math.Min(2000, math.Pow(m, D))
-	}
-
-	estTrunkNodes := cfg.NumTrunks * int(pick.GeomLen(cfg.AvgTrunkLen))
-	estFeederNodes := int(float64(cfg.NumTrunks) * 2 * factor)
-	estConfNodes := int(float64(estFeederNodes) * cfg.FakeBranchFac)
-	estNodes := estTrunkNodes + estFeederNodes + estConfNodes + cfg.NumTrunks*2
-
-	if estNodes < 1 {
-		estNodes = 1
-	}
-
-	return estNodes
 }
