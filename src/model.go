@@ -19,6 +19,7 @@ type Graph struct {
     Pairs [][2]NodeID
     Paths []PairPath
     Allow [][]bool // Allow[fromType][toType]
+    SpikeEdges int // number of edges created by fake branches (spikes)
 }
 
 // PairPath holds a start/end pair and the corresponding path between them

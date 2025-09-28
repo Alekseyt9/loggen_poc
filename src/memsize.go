@@ -2,10 +2,13 @@ package main
 
 import "unsafe"
 
-func GraphMemBreakdown(g *Graph) (total int64, bNodes, bOut, bIn, bPairs, bPathsHdr, bPathsElems, bAllow int64) {
+func GraphMemBreakdown(g *Graph) (total int64) {
+	var bNodes, bOut, bIn, bPairs, bPathsHdr, bPathsElems, bAllow int64
+
 	if g == nil {
-		return 0, 0, 0, 0, 0, 0, 0, 0
+		return 0
 	}
+
 	szNode := int64(unsafe.Sizeof(Node{}))
 	szNodeID := int64(unsafe.Sizeof(NodeID(0)))
 	szPair := int64(unsafe.Sizeof([2]NodeID{}))
@@ -31,5 +34,6 @@ func GraphMemBreakdown(g *Graph) (total int64, bNodes, bOut, bIn, bPairs, bPaths
 	}
 
 	total = bNodes + bOut + bIn + bPairs + bPathsHdr + bPathsElems + bAllow
+
 	return
 }

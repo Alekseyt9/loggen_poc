@@ -5,7 +5,10 @@ import (
 	"math"
 )
 
-func Generate(cfg Config) *Graph { return GenerateWithPicker(cfg, picker.NewRandomPicker(cfg.Seed)) }
+func Generate(cfg Config) *Graph {
+	//return GenerateWithPicker(cfg, picker.NewRandomPicker(cfg.Seed))
+	return GenerateWithPicker(cfg, picker.NewDeterministicPicker(cfg.NumTypes))
+}
 
 func GenerateWithPicker(cfg Config, pick picker.Picker) *Graph {
 	g := newGenerator(cfg, pick)
@@ -31,8 +34,9 @@ type generator struct {
 	parentTail []NodeID   // for tail-side feeders: child -> parent (towards tail)
 	isSpike    []bool     // nodes created as fake spikes
 	trunks     [][]NodeID // nodes along each trunk from head to tail
-	starts     [][]NodeID // per-trunk start leaves (head side)
-	ends       [][]NodeID // per-trunk end leaves (tail side)
+    starts     [][]NodeID // per-trunk start leaves (head side)
+    ends       [][]NodeID // per-trunk end leaves (tail side)
+    spikeEdges int        // count of edges added in fake branches
 }
 
 func newGenerator(cfg Config, picker picker.Picker) *generator {
@@ -75,7 +79,7 @@ func (g *generator) setRole(id NodeID, role byte) { g.nodes[id].Role = role }
 func (g *generator) getType(id NodeID) int { return int(g.nodes[id].Type) }
 
 func (g *generator) graph(pairs [][2]NodeID, paths []PairPath) *Graph {
-	return &Graph{Nodes: g.nodes, Out: g.out, In: g.in, Pairs: pairs, Allow: g.allow, Paths: paths}
+    return &Graph{Nodes: g.nodes, Out: g.out, In: g.in, Pairs: pairs, Allow: g.allow, Paths: paths, SpikeEdges: g.spikeEdges}
 }
 
 func (g *generator) buildTrunks() [][2]NodeID {
@@ -190,39 +194,42 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 
 	for g.picker.Bernoulli(g.cfg.FakeBranchFac) && tries < 3 {
 		tries++
-		L := g.picker.GeomLen(g.cfg.SpikeLenMean)
+		L := g.picker.GeomLen(g.cfg.FakeBranchLenMean)
 		prev := base
 		pt := baseType
 
-		for i := 0; i < L; i++ {
-			nxt := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
-			n := g.addNode(nxt, 2)
-			g.isSpike[n] = true
+        for i := 0; i < L; i++ {
+            nxt := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+            n := g.addNode(nxt, 2)
+            g.isSpike[n] = true
 
-			if g.picker.CoinFlip() {
-				if g.allow[nxt][int(pt)] {
-					g.addEdge(n, prev)
-				}
-			} else {
-				if g.allow[int(pt)][nxt] {
-					g.addEdge(prev, n)
-				}
-			}
+            if g.picker.CoinFlip() {
+                if g.allow[nxt][int(pt)] {
+                    g.addEdge(n, prev)
+                    g.spikeEdges++
+                }
+            } else {
+                if g.allow[int(pt)][nxt] {
+                    g.addEdge(prev, n)
+                    g.spikeEdges++
+                }
+            }
 
 			prev = n
 			pt = nxt
 		}
 
-		if g.picker.Bernoulli(g.cfg.DeadEndProb) {
-			leafT := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
-			leaf := g.addNode(leafT, 2)
-			g.isSpike[leaf] = true
+        if g.picker.Bernoulli(g.cfg.DeadEndProb) {
+            leafT := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+            leaf := g.addNode(leafT, 2)
+            g.isSpike[leaf] = true
 
-			if g.allow[int(pt)][leafT] {
-				g.addEdge(prev, leaf)
-			}
-		}
-	}
+            if g.allow[int(pt)][leafT] {
+                g.addEdge(prev, leaf)
+                g.spikeEdges++
+            }
+        }
+    }
 }
 
 func (g *generator) buildPairs() (pairs [][2]NodeID, paths []PairPath) {

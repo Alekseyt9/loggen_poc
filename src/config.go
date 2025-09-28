@@ -2,16 +2,16 @@ package main
 
 const (
 	defaultSeed               int64   = 1
-	defaultNumTrunks                  = 2000
-	defaultAvgTrunkLen        float64 = 3
-	defaultNumTypes                   = 5
+	defaultNumTrunks                  = 1000
+	defaultAvgTrunkLen        float64 = 1
+	defaultNumTypes                   = 15
 	defaultAvgBranchLen       float64 = 3
-	defaultBranchChildrenMean float64 = 1.7
+	defaultBranchChildrenMean float64 = 5 // 1.7
 	defaultFakeBranchLenMean  float64 = 2
 	defaultDeadEndProb        float64 = 0.85
-	defaultFakeBranchFac      float64 = 0.3 // max = 1
-	defaultStartOnTrunkProb   float64 = 0
-	defaultEndOnTrunkProb     float64 = 0
+	defaultFakeBranchFac      float64 = 0.2 // max = 1
+	defaultStartOnTrunkProb   float64 = 0.05
+	defaultEndOnTrunkProb     float64 = 0.05
 	defaultMakePairs          bool    = true
 )
 
@@ -38,9 +38,9 @@ type Config struct {
 	BranchChildrenMean float64
 
 	// Fake spikes
-	FakeBranchFac float64
-	SpikeLenMean  float64
-	DeadEndProb   float64
+	FakeBranchFac     float64
+	FakeBranchLenMean float64
+	DeadEndProb       float64
 
 	// Endpoints on trunk
 	StartOnTrunkProb float64
@@ -58,7 +58,7 @@ func defaultConfig() Config {
 		NumTypes:           defaultNumTypes,
 		AvgBranchLen:       defaultAvgBranchLen,
 		BranchChildrenMean: defaultBranchChildrenMean,
-		SpikeLenMean:       defaultFakeBranchLenMean,
+		FakeBranchLenMean:  defaultFakeBranchLenMean,
 		DeadEndProb:        defaultDeadEndProb,
 		FakeBranchFac:      defaultFakeBranchFac,
 		StartOnTrunkProb:   defaultStartOnTrunkProb,
