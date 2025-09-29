@@ -90,10 +90,24 @@ func (d *DeterministicPicker) WeightedGlobal(weights []float64) int {
 	return d.stepDeficits(d.defGlobal, weights, nil)
 }
 
-func (d *DeterministicPicker) WeightedAllowed(from int, weights []float64, allow [][]bool) int {
-	d.ensureAllowed(from)
+func (d *DeterministicPicker) WeightedAllowed(from int, weights []float64, allow [][]bool) (int, bool) {
+    d.ensureAllowed(from)
 
-	return d.stepDeficits(d.defAllowed[from], weights, allow[from])
+    // Build allow mask that also enforces positive weights
+    mask := make([]bool, d.numTypes)
+    any := false
+    for t, ok := range allow[from] {
+        if ok && weights[t] > 0 {
+            mask[t] = true
+            any = true
+        }
+    }
+    if !any {
+        return -1, false
+    }
+
+    idx := d.stepDeficits(d.defAllowed[from], weights, mask)
+    return idx, true
 }
 
 func (d *DeterministicPicker) Bernoulli(p float64) bool {

@@ -12,7 +12,7 @@ type Picker interface {
 	WeightedGlobal(weights []float64) int
 
 	// Локальное распределение по доступным переходам
-	WeightedAllowed(fromType int, weights []float64, allow [][]bool) int
+    WeightedAllowed(fromType int, weights []float64, allow [][]bool) (int, bool)
 
 	// Событие с вероятностью p
 	Bernoulli(p float64) bool

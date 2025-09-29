@@ -33,11 +33,11 @@ type generator struct {
 
 	parentHead []NodeID   // child -> parent (к head)
 	parentTail []NodeID   // child -> parent (к tail)
-	isSpike    []bool     // nodes created as fake spikes
-	trunks     [][]NodeID // nodes along each trunk from head to tail
-	starts     [][]NodeID // per-trunk start leaves (head side)
-	ends       [][]NodeID // per-trunk end leaves (tail side)
-	spikeEdges int        // count of edges added in fake branches
+	isSpike    []bool     // фейковые узлы
+	trunks     [][]NodeID // узлы вдоль каждого ствола от головы до хвоста
+	starts     [][]NodeID // стартовые точки
+	ends       [][]NodeID // конечные точки
+	spikeEdges int        // число фейковых узлов (для статистики)
 }
 
 func newGenerator(cfg Config, picker picker.Picker) *generator {
@@ -109,51 +109,59 @@ func (g *generator) buildTree(trunkIdx int, root NodeID, makeStarts bool) {
 		depth = 1
 	}
 
-	frontier := []NodeID{root}
+	g.buildTreeRec(trunkIdx, root, g.getType(root), depth, makeStarts)
+	return
+}
 
-	for level := 1; level <= depth; level++ {
-		nextFrontier := make([]NodeID, 0, len(frontier))
-		for _, parent := range frontier {
-			fromType := g.getType(parent)
-			add := g.picker.Poisson(math.Max(g.cfg.BranchChildrenMean-1, 0.0))
-			children := 1 + add
+// построение дерева
+func (g *generator) buildTreeRec(trunkIdx int, parent NodeID, fromType int, depthLeft int, makeStarts bool) {
+	if depthLeft <= 0 {
+		if makeStarts {
+			g.setRole(parent, 3)
+			g.starts[trunkIdx] = append(g.starts[trunkIdx], parent)
+		} else {
+			g.setRole(parent, 4)
+			g.ends[trunkIdx] = append(g.ends[trunkIdx], parent)
+		}
+		return
+	}
 
-			for c := 0; c < children; c++ {
-				nxtType := g.picker.WeightedAllowed(fromType, g.typeProb, g.allow)
-				child := g.addNode(nxtType, 2)
-				if makeStarts {
-					// от стартовой точки child -> parent к голове
-					if g.allow[nxtType][fromType] {
-						g.addEdge(child, parent)
-						g.parentHead[child] = parent
-					}
-				} else {
-					// до конечной точки edges parent -> child от хвоста
-					if g.allow[fromType][nxtType] {
-						g.addEdge(parent, child)
-						g.parentTail[child] = parent
-					}
-				}
-				if g.cfg.FakeBranchFac > 0 {
-					g.addFakeBranches(child, nxtType)
-				}
-				nextFrontier = append(nextFrontier, child)
+	add := g.picker.Poisson(math.Max(g.cfg.BranchChildrenMean-1, 0.0))
+	children := 1 + add
+
+	for c := 0; c < children; c++ {
+		nxtType, ok := g.picker.WeightedAllowed(fromType, g.typeProb, g.allow)
+		if !ok {
+			if makeStarts {
+				g.setRole(parent, 3)
+				g.starts[trunkIdx] = append(g.starts[trunkIdx], parent)
+			} else {
+				g.setRole(parent, 4)
+				g.ends[trunkIdx] = append(g.ends[trunkIdx], parent)
+			}
+			break
+		}
+
+		child := g.addNode(nxtType, 2)
+		if makeStarts {
+			// от стартовой точки child -> parent к голове
+			if g.allow[nxtType][fromType] {
+				g.addEdge(child, parent)
+				g.parentHead[child] = parent
+			}
+		} else {
+			// до конечной точки edges parent -> child от хвоста
+			if g.allow[fromType][nxtType] {
+				g.addEdge(parent, child)
+				g.parentTail[child] = parent
 			}
 		}
 
-		if level == depth {
-			for _, leaf := range nextFrontier {
-				if makeStarts {
-					g.setRole(leaf, 3)
-					g.starts[trunkIdx] = append(g.starts[trunkIdx], leaf)
-				} else {
-					g.setRole(leaf, 4)
-					g.ends[trunkIdx] = append(g.ends[trunkIdx], leaf)
-				}
-			}
+		if g.cfg.FakeBranchFac > 0 {
+			g.addFakeBranches(child, nxtType)
 		}
 
-		frontier = nextFrontier
+		g.buildTreeRec(trunkIdx, child, nxtType, depthLeft-1, makeStarts)
 	}
 }
 
@@ -167,7 +175,10 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 		pt := baseType
 
 		for i := 0; i < length; i++ {
-			nxt := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+			nxt, ok := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+			if !ok {
+				break
+			}
 			n := g.addNode(nxt, 2)
 			g.isSpike[n] = true
 
@@ -188,7 +199,10 @@ func (g *generator) addFakeBranches(base NodeID, baseType int) {
 		}
 
 		if g.picker.Bernoulli(g.cfg.DeadEndProb) {
-			leafT := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+			leafT, ok := g.picker.WeightedAllowed(pt, g.typeProb, g.allow)
+			if !ok {
+				continue
+			}
 			leaf := g.addNode(leafT, 2)
 			g.isSpike[leaf] = true
 

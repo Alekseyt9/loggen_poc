@@ -69,11 +69,11 @@ func (p *RandomPicker) WeightedGlobal(w []float64) int {
 	return len(w) - 1
 }
 
-func (p *RandomPicker) WeightedAllowed(from int, weights []float64, allow [][]bool) int {
-	row := allow[from]
-	sum := 0.0
-	idx := make([]int, 0, len(row))
-	wts := make([]float64, 0, len(row))
+func (p *RandomPicker) WeightedAllowed(from int, weights []float64, allow [][]bool) (int, bool) {
+    row := allow[from]
+    sum := 0.0
+    idx := make([]int, 0, len(row))
+    wts := make([]float64, 0, len(row))
 
 	for t, ok := range row {
 		if ok {
@@ -86,9 +86,9 @@ func (p *RandomPicker) WeightedAllowed(from int, weights []float64, allow [][]bo
 		}
 	}
 
-	if len(idx) == 0 {
-		return from
-	}
+    if len(idx) == 0 {
+        return -1, false
+    }
 
 	u := p.rnd.Float64() * sum
 	acc := 0.0
@@ -96,11 +96,11 @@ func (p *RandomPicker) WeightedAllowed(from int, weights []float64, allow [][]bo
 	for i, id := range idx {
 		acc += wts[i]
 		if u <= acc {
-			return id
-		}
-	}
+            return id, true
+        }
+    }
 
-	return idx[len(idx)-1]
+    return idx[len(idx)-1], true
 }
 
 func (p *RandomPicker) Bernoulli(prob float64) bool { return prob > 0 && p.rnd.Float64() < prob }

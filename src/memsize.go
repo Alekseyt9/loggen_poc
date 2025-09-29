@@ -11,7 +11,6 @@ func GraphMemBreakdown(g *Graph) (total int64) {
 
 	szNode := int64(unsafe.Sizeof(Node{}))
 	szNodeID := int64(unsafe.Sizeof(NodeID(0)))
-	szPair := int64(unsafe.Sizeof([2]NodeID{}))
 	szPairPathHdr := int64(unsafe.Sizeof(PairPath{}))
 	szBool := int64(unsafe.Sizeof(true))
 
@@ -23,7 +22,6 @@ func GraphMemBreakdown(g *Graph) (total int64) {
 		bIn += int64(len(g.In[i])) * szNodeID
 	}
 
-	bPairs = int64(len(g.Pairs)) * szPair
 	bPathsHdr = int64(len(g.Paths)) * szPairPathHdr
 	for i := range g.Paths {
 		bPathsElems += int64(len(g.Paths[i].Path)) * szNodeID
