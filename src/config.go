@@ -2,7 +2,7 @@ package main
 
 const (
 	defaultSeed               int64   = 1
-	defaultNumTrunks                  = 1000
+	defaultNumTrunks                  = 1001
 	defaultAvgTrunkLen        float64 = 1
 	defaultNumTypes                   = 15
 	defaultAvgBranchLen       float64 = 3
@@ -12,7 +12,6 @@ const (
 	defaultFakeBranchFac      float64 = 0.2 // max = 1
 	defaultStartOnTrunkProb   float64 = 0.05
 	defaultEndOnTrunkProb     float64 = 0.05
-	defaultMakePairs          bool    = true
 )
 
 // -------------------------------
@@ -22,32 +21,28 @@ const (
 type Config struct {
 	Seed int64
 
-	// Trunks
-	NumTrunks     int
-	AvgTrunkLen   float64
-	TrunkLenMin   int
-	TrunkTypeProb []float64
+	// Магистраль
+	NumTrunks     int       // число магистралей
+	AvgTrunkLen   float64   // средняя длина магистрали
+	TrunkTypeProb []float64 // распределение типов путей в магистрали
 
-	// Types and transitions
+	// Переходы (склейки)
 	NumTypes int
-	TypeProb []float64
-	Allow    [][]bool
+	TypeProb []float64 // распределение типов маршрутов
+	Allow    [][]bool  // матрица возможных переходов (склеек)
 
-	// Feeder trees
-	AvgBranchLen       float64
-	BranchChildrenMean float64
+	// Ветки деревьев от магистрали
+	AvgBranchLen       float64 // общая длина ветки до конечной точки
+	BranchChildrenMean float64 // сколько детей у каждой ветки
 
-	// Fake spikes
+	// Фейковые ветки для нагрузки
 	FakeBranchFac     float64
 	FakeBranchLenMean float64
 	DeadEndProb       float64
 
-	// Endpoints on trunk
+	// Точки на магистрали
 	StartOnTrunkProb float64
 	EndOnTrunkProb   float64
-
-	// Pairs for benchmark
-	MakePairs bool
 }
 
 func defaultConfig() Config {
@@ -63,6 +58,5 @@ func defaultConfig() Config {
 		FakeBranchFac:      defaultFakeBranchFac,
 		StartOnTrunkProb:   defaultStartOnTrunkProb,
 		EndOnTrunkProb:     defaultEndOnTrunkProb,
-		MakePairs:          defaultMakePairs,
 	}
 }
