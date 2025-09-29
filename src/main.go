@@ -11,17 +11,18 @@ func main() {
 		edges += len(outs)
 	}
 
-	// Output sizes of Out and In matrices
 	outRows := len(g.Out)
 	inRows := len(g.In)
 	outMax := 0
 	inMax := 0
+
 	for _, row := range g.Out {
 		l := len(row)
 		if l > outMax {
 			outMax = l
 		}
 	}
+
 	for _, row := range g.In {
 		l := len(row)
 		if l > inMax {
